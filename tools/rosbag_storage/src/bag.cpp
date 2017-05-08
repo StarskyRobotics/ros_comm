@@ -45,6 +45,9 @@
 
 #define foreach BOOST_FOREACH
 
+#include <unistd.h>
+
+
 using std::map;
 using std::priority_queue;
 using std::string;
@@ -71,7 +74,8 @@ Bag::Bag() :
     chunk_open_(false),
     curr_chunk_data_pos_(0),
     current_buffer_(0),
-    decompressed_chunk_(0)
+    decompressed_chunk_(0),
+	parent(this)
 {
 }
 
@@ -87,7 +91,8 @@ Bag::Bag(string const& filename, uint32_t mode) :
     chunk_open_(false),
     curr_chunk_data_pos_(0),
     current_buffer_(0),
-    decompressed_chunk_(0)
+    decompressed_chunk_(0),
+	parent(this)
 {
     open(filename, mode);
 }
@@ -159,6 +164,9 @@ void Bag::openAppend(string const& filename) {
 void Bag::close() {
     if (!file_.isOpen())
         return;
+
+    indexReaderThread.interrupt();
+    indexReaderThread.join();
 
     if (mode_ & bagmode::Write || mode_ & bagmode::Append)
     	closeWrite();
@@ -264,7 +272,9 @@ void Bag::stopWriting() {
     writeFileHeaderRecord();
 }
 
+
 void Bag::startReadingVersion200() {
+    bag2 = new Bag();
     // Read the file header record, which points to the end of the chunks
     readFileHeaderRecord();
 
@@ -279,8 +289,20 @@ void Bag::startReadingVersion200() {
     for (uint32_t i = 0; i < chunk_count_; i++)
         readChunkInfoRecord();
 
+    bag2->file_.openRead(file_.getFileName());
+    bag2->readVersion();
+    bag2->parent = this;
+    bag2->file_.seek(file_.getOffset());
+    indexReaderThread = boost::thread(boost::bind(&Bag::_startReadingVersion200, bag2));
+    while(chunksRead < 10) {
+	boost::this_thread::sleep_for(boost::chrono::milliseconds(10));
+    }
+}
+
+void Bag::_startReadingVersion200() {
     // Read the connection indexes for each chunk
-    foreach(ChunkInfo const& chunk_info, chunks_) {
+try {
+    foreach(ChunkInfo const& chunk_info, parent->chunks_) {
         curr_chunk_info_ = chunk_info;
 
         seek(curr_chunk_info_.pos);
@@ -293,10 +315,15 @@ void Bag::startReadingVersion200() {
         // Read the index records after the chunk
         for (unsigned int i = 0; i < chunk_info.connection_counts.size(); i++)
             readConnectionIndexRecord200();
+
+	parent->chunksRead++;
+	boost::this_thread::interruption_point();
     }
+	parent->chunksRead=999;
 
     // At this point we don't have a curr_chunk_info anymore so we reset it
     curr_chunk_info_ = ChunkInfo();
+} catch (boost::thread_interrupted&) {}
 }
 
 void Bag::startReadingVersion102() {
@@ -605,7 +632,7 @@ void Bag::readConnectionIndexRecord200() {
 
     uint64_t chunk_pos = curr_chunk_info_.pos;
 
-    multiset<IndexEntry>& connection_index = connection_indexes_[connection_id];
+    multiset<IndexEntry>& connection_index = parent->connection_indexes_[connection_id];
 
     for (uint32_t i = 0; i < count; i++) {
         IndexEntry index_entry;

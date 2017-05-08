@@ -57,6 +57,7 @@
 #include <set>
 #include <stdexcept>
 
+#include <boost/thread.hpp>
 #include <boost/format.hpp>
 #include <boost/iterator/iterator_facade.hpp>
 
@@ -190,6 +191,7 @@ private:
 
     void startReadingVersion102();
     void startReadingVersion200();
+    void _startReadingVersion200();
 
     // Writing
     
@@ -308,6 +310,11 @@ private:
     mutable Buffer*  current_buffer_;
 
     mutable uint64_t decompressed_chunk_;      //!< position of decompressed chunk
+
+    Bag* parent;
+    Bag* bag2;
+    boost::thread indexReaderThread;
+    volatile int chunksRead;
 };
 
 } // namespace rosbag
