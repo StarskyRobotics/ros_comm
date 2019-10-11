@@ -155,16 +155,16 @@ int Recorder::run() {
     last_buffer_warn_ = Time();
     queue_ = new std::queue<OutgoingMessage>;
 
+    if (!ros::Time::waitForValid(ros::WallDuration(2.0)))
+      ROS_WARN("/use_sim_time set to true and no clock published.  Still waiting for valid time...");
+
+    ros::Time::waitForValid();
+
     // Subscribe to each topic
     if (!options_.regex) {
     	foreach(string const& topic, options_.topics)
 			subscribe(topic);
     }
-
-    if (!ros::Time::waitForValid(ros::WallDuration(2.0)))
-      ROS_WARN("/use_sim_time set to true and no clock published.  Still waiting for valid time...");
-
-    ros::Time::waitForValid();
 
     start_time_ = ros::Time::now();
 
@@ -217,7 +217,7 @@ shared_ptr<ros::Subscriber> Recorder::subscribe(string const& topic) {
 
     ros::SubscribeOptions ops;
     ops.topic = topic;
-    ops.queue_size = 100;
+    ops.queue_size = 1000;
     ops.md5sum = ros::message_traits::md5sum<topic_tools::ShapeShifter>();
     ops.datatype = ros::message_traits::datatype<topic_tools::ShapeShifter>();
     ops.helper = boost::make_shared<ros::SubscriptionCallbackHelperT<
@@ -286,12 +286,11 @@ std::string Recorder::timeToStr(T ros_t)
 //! Callback to be invoked to save messages into a queue
 void Recorder::doQueue(const ros::MessageEvent<topic_tools::ShapeShifter const>& msg_event, string const& topic, shared_ptr<ros::Subscriber> subscriber, shared_ptr<int> count) {
     //void Recorder::doQueue(topic_tools::ShapeShifter::ConstPtr msg, string const& topic, shared_ptr<ros::Subscriber> subscriber, shared_ptr<int> count) {
-    Time rectime = Time::now();
     
     if (options_.verbose)
         cout << "Received message on topic " << subscriber->getTopic() << endl;
 
-    OutgoingMessage out(topic, msg_event.getMessage(), msg_event.getConnectionHeaderPtr(), rectime);
+    OutgoingMessage out(topic, msg_event.getMessage(), msg_event.getConnectionHeaderPtr(), msg_event.getReceiptTime());
     
     {
         boost::mutex::scoped_lock lock(queue_mutex_);
